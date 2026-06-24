@@ -1,0 +1,53 @@
+name: Bid Monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 */2 * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bid-monitor
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    env:
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      CHECK_DAYS: ${{ secrets.CHECK_DAYS }}
+      SEND_TELEGRAM: ${{ secrets.SEND_TELEGRAM }}
+      SEND_EMPTY_SUMMARY: ${{ secrets.SEND_EMPTY_SUMMARY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bid monitor
+        run: python main.py
+
+      - name: Commit sent bid state
+        run: |
+          if git diff --quiet -- state/sent_bids.json; then
+            echo "No sent bid state changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state/sent_bids.json
+          git commit -m "Update sent bid state"
+          git push
