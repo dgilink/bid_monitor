@@ -25,6 +25,7 @@ class Settings:
     send_empty_summary: bool = False
     db_path: Path = DATA_DIR / "bids.sqlite"
     request_timeout: int = 30
+    document_timeout: int = 8
     request_sleep_seconds: float = 0.25
     max_document_downloads: int = 8
 
@@ -44,6 +45,9 @@ def load_settings() -> Settings:
         send_telegram=os.getenv("SEND_TELEGRAM", "true").lower() in {"1", "true", "yes", "y"},
         send_empty_summary=os.getenv("SEND_EMPTY_SUMMARY", "false").lower() in {"1", "true", "yes", "y"},
         db_path=Path(os.getenv("SQLITE_PATH", DATA_DIR / "bids.sqlite")),
+        request_timeout=int(os.getenv("REQUEST_TIMEOUT", "30") or "30"),
+        document_timeout=int(os.getenv("DOCUMENT_TIMEOUT", "8") or "8"),
+        max_document_downloads=int(os.getenv("MAX_DOCUMENT_DOWNLOADS", "8") or "8"),
     )
 
 

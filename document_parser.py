@@ -35,7 +35,7 @@ def download_file(url: str, settings: Settings) -> Path | None:
         target = DOWNLOAD_DIR / f"doc_{abs(hash(url))}{suffix}"
         if target.exists():
             return target
-        response = requests.get(url, timeout=settings.request_timeout, headers={"User-Agent": "bid-monitor/1.0"})
+        response = requests.get(url, timeout=settings.document_timeout, headers={"User-Agent": "bid-monitor/1.0"})
         response.raise_for_status()
         target.write_bytes(response.content)
         return target

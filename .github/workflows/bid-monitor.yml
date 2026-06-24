@@ -23,6 +23,8 @@ jobs:
       CHECK_DAYS: ${{ secrets.CHECK_DAYS }}
       SEND_TELEGRAM: ${{ secrets.SEND_TELEGRAM }}
       SEND_EMPTY_SUMMARY: ${{ secrets.SEND_EMPTY_SUMMARY }}
+      DOCUMENT_TIMEOUT: 8
+      MAX_DOCUMENT_DOWNLOADS: 3
 
     steps:
       - name: Check out repository

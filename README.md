@@ -21,6 +21,8 @@ TELEGRAM_CHAT_ID=your_telegram_chat_id
 CHECK_DAYS=3
 SEND_TELEGRAM=true
 SEND_EMPTY_SUMMARY=false
+DOCUMENT_TIMEOUT=8
+MAX_DOCUMENT_DOWNLOADS=3
 SQLITE_PATH=data/bids.sqlite
 ```
 
@@ -72,6 +74,7 @@ The workflow:
 - supports manual execution with `workflow_dispatch`
 - runs every 2 days at UTC 00:00, which is Korea time 09:00
 - commits `state/sent_bids.json` after successful sends so duplicate Telegram alerts are avoided across GitHub Actions runs
+- limits attachment download waits with `DOCUMENT_TIMEOUT=8` and `MAX_DOCUMENT_DOWNLOADS=3`
 
 Register secrets in GitHub:
 
