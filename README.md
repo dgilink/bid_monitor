@@ -1,6 +1,6 @@
 # Nara Bid Monitor
 
-나라장터 공고 목록을 조회하고 개발 관련 공고를 선별해 Telegram으로 알림을 보내는 Python 스크립트입니다.
+나라장터 입찰 공고를 조회하고, 개발 관련 공고를 필터링해 Telegram으로 알림을 보내는 Python 스크립트입니다.
 
 ## Local Setup
 
@@ -12,7 +12,7 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-`.env`에 실제 값을 입력합니다. `.env`는 절대 Git에 올리지 마세요.
+`.env`에는 실제 값을 넣습니다. `.env`는 Git에 커밋하지 않습니다.
 
 ```env
 DATA_GO_KR_SERVICE_KEY=your_data_go_kr_service_key
@@ -23,6 +23,7 @@ SEND_TELEGRAM=true
 SEND_EMPTY_SUMMARY=false
 DOCUMENT_TIMEOUT=8
 MAX_DOCUMENT_DOWNLOADS=3
+MOCK_MODE=false
 SQLITE_PATH=data/bids.sqlite
 ```
 
@@ -42,73 +43,76 @@ python main.py --list-matched
 python main.py --diagnose-nara
 ```
 
-## GitHub Push
-
-```powershell
-git init
-git remote add origin https://github.com/dgilink/bid_monitor.git
-git add .
-git status
-git commit -m "Add Nara bid monitor with Telegram alerts"
-git branch -M main
-git push -u origin main
-```
-
-Before committing, confirm these are not staged:
-
-- `.env`
-- `.venv/`
-- `data/*.sqlite`
-- `logs/`
-- `downloads/`
-
 ## GitHub Actions
 
-Workflow file: `.github/workflows/bid-monitor.yml`
+Workflow file:
+
+```text
+.github/workflows/bid-monitor.yml
+```
 
 The workflow:
 
+- runs manually with `workflow_dispatch`
+- runs every 2 days at `00:00 UTC`, which is `09:00 KST`
 - uses Python 3.11
-- installs dependencies with `pip install -r requirements.txt`
+- installs dependencies from `requirements.txt`
 - runs `python main.py`
-- supports manual execution with `workflow_dispatch`
-- runs every 2 days at UTC 00:00, which is Korea time 09:00
-- commits `state/sent_bids.json` after successful sends so duplicate Telegram alerts are avoided across GitHub Actions runs
-- limits attachment download waits with `DOCUMENT_TIMEOUT=8` and `MAX_DOCUMENT_DOWNLOADS=3`
+- commits only `state/sent_bids.json` when successful sends update the state
 
-Register secrets in GitHub:
-
-`Repository -> Settings -> Secrets and variables -> Actions -> New repository secret`
-
-Required secrets:
+Required repository secrets:
 
 - `DATA_GO_KR_SERVICE_KEY`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
-- `CHECK_DAYS`
-- `SEND_TELEGRAM`
-- `SEND_EMPTY_SUMMARY`
 
-Recommended values:
+Optional repository secrets:
+
+- `CHECK_DAYS` defaults to `3`
+- `SEND_TELEGRAM` defaults to `true`
+- `SEND_EMPTY_SUMMARY` defaults to `false`
+
+Set them in:
 
 ```text
-CHECK_DAYS=3
-SEND_TELEGRAM=true
-SEND_EMPTY_SUMMARY=false
+Repository -> Settings -> Secrets and variables -> Actions -> New repository secret
 ```
 
-To run manually:
+Manual run path:
 
-`Repository -> Actions -> Bid Monitor -> Run workflow`
+```text
+Repository -> Actions -> Bid Monitor -> Run workflow
+```
 
-## State And Storage
+## Duplicate Notification State
 
-- `state/sent_bids.json` is committed and contains only sent `bid_id` values.
-- `data/bids.sqlite` is local runtime storage and is ignored.
-- `logs/` and `downloads/` are ignored.
-- API keys, Telegram token, and chat id must only be stored in local `.env` or GitHub Secrets.
+Duplicate Telegram sends are prevented by `state/sent_bids.json`.
 
-## Nara API Diagnostics
+- The file stores sent `bid_id` values only.
+- The file is intentionally committed so GitHub Actions can keep state between scheduled runs.
+- A `bid_id` is added only after Telegram send succeeds.
+- Runtime DB and logs are not used for cross-run duplicate prevention in GitHub Actions.
+
+## Ignored Local Files
+
+Do not commit local secrets or runtime outputs:
+
+- `.env`
+- `.venv/`
+- `data/bids.sqlite`
+- `logs/`
+- `downloads/`
+
+Current `.gitignore` blocks these paths. Before committing, verify with:
+
+```powershell
+git status --short
+git ls-files .env .venv data/bids.sqlite logs downloads
+```
+
+The second command should print nothing.
+
+## Nara API
 
 Normal runs use:
 
@@ -116,8 +120,18 @@ Normal runs use:
 https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServc
 ```
 
-Fallback endpoint combinations are tested only by:
+Diagnostics:
 
 ```powershell
+python main.py --test-nara
 python main.py --diagnose-nara
+```
+
+## Git Remote
+
+Expected remote:
+
+```powershell
+git remote set-url origin https://github.com/dgilink/bid_monitor.git
+git remote -v
 ```

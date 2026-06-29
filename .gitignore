@@ -5,8 +5,15 @@
 venv/
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 data/*.sqlite
+data/*.sqlite3
 data/*.db
+data/*.db-journal
+data/*.sqlite-journal
 logs/
 downloads/
 *.log
+.pytest_cache/
+.mypy_cache/

@@ -39,6 +39,24 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Apply runtime defaults
+        shell: bash
+        run: |
+          echo "CHECK_DAYS=${CHECK_DAYS:-3}" >> "$GITHUB_ENV"
+          echo "SEND_TELEGRAM=${SEND_TELEGRAM:-true}" >> "$GITHUB_ENV"
+          echo "SEND_EMPTY_SUMMARY=${SEND_EMPTY_SUMMARY:-false}" >> "$GITHUB_ENV"
+          echo "DOCUMENT_TIMEOUT=${DOCUMENT_TIMEOUT:-8}" >> "$GITHUB_ENV"
+          echo "MAX_DOCUMENT_DOWNLOADS=${MAX_DOCUMENT_DOWNLOADS:-3}" >> "$GITHUB_ENV"
+          echo "SQLITE_PATH=data/bids.sqlite" >> "$GITHUB_ENV"
+
+      - name: Ensure sent state file exists
+        shell: bash
+        run: |
+          mkdir -p state
+          if [ ! -f state/sent_bids.json ]; then
+            printf '{\n  "sent_bid_ids": [],\n  "updated_at": null\n}\n' > state/sent_bids.json
+          fi
+
       - name: Run bid monitor
         run: python main.py
 
@@ -52,4 +70,5 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add state/sent_bids.json
           git commit -m "Update sent bid state"
+          git pull --rebase
           git push
