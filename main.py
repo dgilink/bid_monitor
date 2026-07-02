@@ -105,6 +105,7 @@ def main() -> int:
         detail_client = None if settings.mock_mode else client
         matched_count = 0
         notified_count = 0
+        notification_failures = 0
         grade_counts = {"A": 0, "B": 0, "C": 0, "D": 0}
 
         for bid in bids:
@@ -149,13 +150,16 @@ def main() -> int:
                         storage.mark_notified(row["bid_id"])
                         sent_state.add(row["bid_id"])
                         notified_count += 1
+                    else:
+                        notification_failures += 1
             except Exception as exc:
                 logging.exception("Bid processing failed: %s", exc)
 
+        summary_failed = False
         if settings.send_empty_summary:
-            send_message(settings, format_run_summary(len(bids), matched_count, grade_counts, notified_count))
+            summary_failed = not send_message(settings, format_run_summary(len(bids), matched_count, grade_counts, notified_count))
         elif grade_counts.get("C", 0):
-            send_message(settings, format_summary(grade_counts.get("C", 0)))
+            summary_failed = not send_message(settings, format_summary(grade_counts.get("C", 0)))
 
         storage.finish_run(
             run_id,
@@ -174,6 +178,13 @@ def main() -> int:
             grade_counts.get("D", 0),
             notified_count,
         )
+        if notification_failures or summary_failed:
+            logging.error(
+                "Telegram send failed notification_failures=%s summary_failed=%s",
+                notification_failures,
+                summary_failed,
+            )
+            return 1
         return 0
     except Exception as exc:
         logging.exception("Run failed")

@@ -49,6 +49,29 @@ jobs:
           echo "MAX_DOCUMENT_DOWNLOADS=${MAX_DOCUMENT_DOWNLOADS:-3}" >> "$GITHUB_ENV"
           echo "SQLITE_PATH=data/bids.sqlite" >> "$GITHUB_ENV"
 
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          missing=0
+          for name in DATA_GO_KR_SERVICE_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not configured"
+              missing=1
+            fi
+          done
+
+          send_telegram="$(printf '%s' "$SEND_TELEGRAM" | tr '[:upper:]' '[:lower:]')"
+          if [ "$send_telegram" != "false" ]; then
+            for name in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
+              if [ -z "${!name}" ]; then
+                echo "::error::$name is not configured"
+                missing=1
+              fi
+            done
+          fi
+
+          exit "$missing"
+
       - name: Ensure sent state file exists
         shell: bash
         run: |
