@@ -7,9 +7,10 @@ from typing import Any
 
 
 class SentBidState:
+    # Persistent Telegram delivery state with legacy migration.
     def __init__(self, path: Path = Path("state") / "sent_bids.json") -> None:
         self.path = path
-        self.sent_bid_ids: set[str] = set()
+        self.bids: dict[str, dict[str, Any]] = {}
         self.changed = False
         self._load()
 
@@ -20,26 +21,71 @@ class SentBidState:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return
-
-        bid_ids = data.get("sent_bid_ids") if isinstance(data, dict) else None
-        if isinstance(bid_ids, list):
-            self.sent_bid_ids = {str(bid_id) for bid_id in bid_ids if str(bid_id).strip()}
-
-    def has(self, bid_id: str) -> bool:
-        return bid_id in self.sent_bid_ids
-
-    def add(self, bid_id: str) -> None:
-        if bid_id in self.sent_bid_ids:
+        if not isinstance(data, dict):
             return
-        self.sent_bid_ids.add(bid_id)
+
+        current = data.get("bids")
+        if isinstance(current, dict):
+            for bid_id, value in current.items():
+                if not str(bid_id).strip():
+                    continue
+                if isinstance(value, dict):
+                    self.bids[str(bid_id)] = {
+                        "last_sent_hash": value.get("last_sent_hash"),
+                        "sent_at": value.get("sent_at"),
+                    }
+            return
+
+        legacy = data.get("sent_bid_ids")
+        if isinstance(legacy, list):
+            for bid_id in legacy:
+                bid_id = str(bid_id).strip()
+                if bid_id:
+                    self.bids[bid_id] = {
+                        "last_sent_hash": None,
+                        "sent_at": None,
+                    }
+
+    def notification_kind(self, bid_id: str, content_hash: str) -> str:
+        item = self.bids.get(bid_id)
+        if item is None:
+            return "new"
+
+        previous_hash = item.get("last_sent_hash")
+        if not previous_hash:
+            return "legacy"
+        if str(previous_hash) == content_hash:
+            return "same"
+        return "changed"
+
+    def set_baseline(self, bid_id: str, content_hash: str) -> None:
+        item = self.bids.setdefault(bid_id, {})
+        if item.get("last_sent_hash") == content_hash:
+            return
+        item["last_sent_hash"] = content_hash
+        item.setdefault("sent_at", None)
+        self.changed = True
+
+    def mark_sent(self, bid_id: str, content_hash: str) -> None:
+        self.bids[bid_id] = {
+            "last_sent_hash": content_hash,
+            "sent_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        }
         self.changed = True
 
     def save(self) -> None:
         if not self.changed and self.path.exists():
             return
+
         self.path.parent.mkdir(exist_ok=True)
         data: dict[str, Any] = {
-            "sent_bid_ids": sorted(self.sent_bid_ids),
-            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "bids": dict(sorted(self.bids.items())),
+            "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         }
-        self.path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+        temp = self.path.with_suffix(self.path.suffix + ".tmp")
+        temp.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        temp.replace(self.path)

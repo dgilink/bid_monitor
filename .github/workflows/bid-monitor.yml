@@ -3,7 +3,8 @@ name: Bid Monitor
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 0 */2 * *"
+    - cron: "17 9 * * *"
+      timezone: "Asia/Seoul"
 
 permissions:
   contents: write
@@ -28,16 +29,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+        uses: actions/checkout@v6
 
       - name: Apply runtime defaults
         shell: bash
@@ -72,26 +64,37 @@ jobs:
 
           exit "$missing"
 
-      - name: Ensure sent state file exists
-        shell: bash
-        run: |
-          mkdir -p state
-          if [ ! -f state/sent_bids.json ]; then
-            printf '{\n  "sent_bid_ids": [],\n  "updated_at": null\n}\n' > state/sent_bids.json
-          fi
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
 
-      - name: Run bid monitor
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Ensure runtime state directory exists
+        shell: bash
+        run: mkdir -p state
+
+      - id: monitor
+        name: Run bid monitor
         run: python main.py
 
-      - name: Commit sent bid state
+      - name: Commit runtime state
+        if: ${{ always() && steps.monitor.outcome != 'skipped' }}
+        shell: bash
         run: |
-          if git diff --quiet -- state/sent_bids.json; then
-            echo "No sent bid state changes."
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add state/sent_bids.json
-          git commit -m "Update sent bid state"
+
+          git add state/sent_bids.json state/health.json
+
+          if git diff --cached --quiet; then
+            echo "No runtime state changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Update bid monitor runtime state"
           git pull --rebase
           git push

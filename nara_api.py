@@ -45,6 +45,11 @@ class DiagnoseResult:
         return self.status == 200 and str(self.result_code or "").strip() in {"00", "0"}
 
 
+class CoreNaraApiError(RuntimeError):
+    # Required list API cannot be trusted.
+    pass
+
+
 class NaraApiClient:
     """Client for 조달청_나라장터 입찰공고정보서비스."""
 
@@ -109,7 +114,7 @@ class NaraApiClient:
                         result_code,
                         result_msg,
                     )
-                return _empty_response(result_code or str(response.status_code), result_msg or "Nara API server error")
+                return _empty_response(f"HTTP_{response.status_code}", result_msg or "Nara API server error")
 
             if response.status_code >= 400:
                 if response.status_code == 404 and not is_core_list:
@@ -132,7 +137,7 @@ class NaraApiClient:
                         result_code,
                         result_msg,
                     )
-                return _empty_response(result_code or str(response.status_code), result_msg or "Nara API request failed")
+                return _empty_response(f"HTTP_{response.status_code}", result_msg or "Nara API request failed")
 
             if not isinstance(data, dict):
                 if is_core_list:
@@ -195,6 +200,15 @@ class NaraApiClient:
                 "numOfRows": rows,
             },
         )
+        result_code, result_msg = extract_result(data)
+        normalized_code = str(result_code or "").strip()
+        if normalized_code not in {"", "0", "00"}:
+            raise CoreNaraApiError(
+                "Core Nara API failed "
+                f"operation={self.CORE_LIST_OPERATION} "
+                f"resultCode={normalized_code} "
+                f"resultMsg={result_msg or 'unknown'}"
+            )
         return self._items(data)
 
     def get_all_service_bids(self, begin: datetime, end: datetime) -> list[dict[str, Any]]:

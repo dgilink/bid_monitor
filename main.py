@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from config import INCLUDE_KEYWORDS, LOG_DIR, load_settings
@@ -142,13 +143,31 @@ def main() -> int:
                     analysis.comment += "; 첨부문서 수동확인 필요"
                 grade_counts[analysis.grade] = grade_counts.get(analysis.grade, 0) + 1
                 row = build_row(bid_no, bid_ord, merged, urls, license_limits, regions, analysis)
-                is_new, changed = storage.upsert_bid(row)
-                already_sent = sent_state.has(row["bid_id"])
-                should_notify = row["grade"] in {"A", "B"} and (is_new or changed) and not already_sent
+                storage.upsert_bid(row)
+
+                notification_kind = sent_state.notification_kind(
+                    row["bid_id"],
+                    row["content_hash"],
+                )
+
+                # Legacy sent_bid_ids had no content hash. Baseline once
+                # without generating a duplicate notification.
+                if notification_kind == "legacy":
+                    sent_state.set_baseline(row["bid_id"], row["content_hash"])
+                    notification_kind = "same"
+
+                should_notify = (
+                    row["grade"] in {"A", "B"}
+                    and notification_kind in {"new", "changed"}
+                )
                 if should_notify:
-                    if send_message(settings, format_bid_message(row, changed=changed)):
+                    changed_notice = notification_kind == "changed"
+                    if send_message(
+                        settings,
+                        format_bid_message(row, changed=changed_notice),
+                    ):
                         storage.mark_notified(row["bid_id"])
-                        sent_state.add(row["bid_id"])
+                        sent_state.mark_sent(row["bid_id"], row["content_hash"])
                         notified_count += 1
                     else:
                         notification_failures += 1
@@ -184,15 +203,57 @@ def main() -> int:
                 notification_failures,
                 summary_failed,
             )
+            write_health(
+                status="failed",
+                fetched_count=len(bids),
+                matched_count=matched_count,
+                notified_count=notified_count,
+                error="Telegram delivery failed",
+            )
             return 1
+
+        write_health(
+            status="ok",
+            fetched_count=len(bids),
+            matched_count=matched_count,
+            notified_count=notified_count,
+        )
         return 0
     except Exception as exc:
         logging.exception("Run failed")
         storage.finish_run(run_id, error=str(exc))
+        write_health(status="failed", error=str(exc))
         return 1
     finally:
         sent_state.save()
         storage.close()
+
+
+
+def write_health(
+    *,
+    status: str,
+    fetched_count: int | None = None,
+    matched_count: int | None = None,
+    notified_count: int | None = None,
+    error: str | None = None,
+) -> None:
+    path = Path("state") / "health.json"
+    path.parent.mkdir(exist_ok=True)
+    payload = {
+        "status": status,
+        "last_run_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "fetched_count": fetched_count,
+        "matched_count": matched_count,
+        "notified_count": notified_count,
+        "error": error,
+    }
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temp.replace(path)
 
 
 def print_recent_matched(rows: list[dict[str, Any]]) -> None:
