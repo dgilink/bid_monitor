@@ -1,7 +1,33 @@
 {
-  "sent_bid_ids": [
-    "R26BK01605998-000",
-    "R26BK01606078-000"
-  ],
-  "updated_at": "2026-06-29T23:02:26"
+  "bids": {
+    "R26BK01605998-000": {
+      "last_sent_hash": null,
+      "sent_at": null
+    },
+    "R26BK01606078-000": {
+      "last_sent_hash": null,
+      "sent_at": null
+    },
+    "R26BK01684501-000": {
+      "last_sent_hash": "4d38b63e4679aeb85b5dc23b424ebdfe839c48301d0b75db73103bc71441da2a",
+      "sent_at": "2026-08-20T01:53:07+00:00"
+    },
+    "R26BK01686686-000": {
+      "last_sent_hash": "6d99143e283fd6e455c6d8dc5e75cb4a46cb05602ce9df9631d4d89969bd892d",
+      "sent_at": "2026-08-20T01:53:47+00:00"
+    },
+    "R26BK01687767-000": {
+      "last_sent_hash": "98d6a05cd84e740e58329a5fe8c19148fd9c40ac308039e06d6c1fe88284353d",
+      "sent_at": "2026-08-20T01:54:21+00:00"
+    },
+    "R26BK01687767-001": {
+      "last_sent_hash": "b3feb52b93ef4edee1b26a5afbd581a2282306a03175a7ecf2fc9f0115142283",
+      "sent_at": "2026-08-20T01:54:40+00:00"
+    },
+    "R26BK01688370-000": {
+      "last_sent_hash": "331447c80e900a1fdac41a919e86427633af1c16ab2d0e6ed49f3bba0470dfee",
+      "sent_at": "2026-08-20T01:55:06+00:00"
+    }
+  },
+  "updated_at": "2026-08-20T01:55:28+00:00"
 }
