@@ -1,8 +1,8 @@
 {
-  "status": "failed",
-  "last_run_at": "2026-09-08T04:35:40+00:00",
-  "fetched_count": null,
-  "matched_count": null,
-  "notified_count": null,
-  "error": "Core Nara API failed operation=getBidPblancListInfoServc resultCode=TIMEOUT resultMsg=request timed out"
+  "status": "ok",
+  "last_run_at": "2026-09-09T04:47:41+00:00",
+  "fetched_count": 1312,
+  "matched_count": 26,
+  "notified_count": 7,
+  "error": null
 }
