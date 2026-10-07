@@ -43,6 +43,10 @@ python main.py --list-matched
 python main.py --diagnose-nara
 ```
 
+`--test-telegram` and `--force-notify-test` send a real Telegram message when
+`SEND_TELEGRAM=true`. Use them only for an explicitly approved production
+smoke test. They are not run by the automated test suite or routine validation.
+
 ## GitHub Actions
 
 Workflow file:
@@ -54,11 +58,13 @@ Workflow file:
 The workflow:
 
 - runs manually with `workflow_dispatch`
-- runs every 2 days at `00:00 UTC`, which is `09:00 KST`
+- runs every day at `00:17`, `03:17`, `06:17`, and `09:17 UTC`
+  (`09:17`, `12:17`, `15:17`, and `18:17 KST`)
 - uses Python 3.11
 - installs dependencies from `requirements.txt`
 - runs `python main.py`
-- commits only `state/sent_bids.json` when successful sends update the state
+- commits `state/sent_bids.json`, `state/health.json`, and
+  `state/notification_health.json` after the monitor step, including failed runs
 
 Required repository secrets:
 
@@ -70,7 +76,9 @@ Optional repository secrets:
 
 - `CHECK_DAYS` defaults to `3`
 - `SEND_TELEGRAM` defaults to `true`
-- `SEND_EMPTY_SUMMARY` defaults to `false`
+- `SEND_EMPTY_SUMMARY` defaults to `false` and is retained for configuration
+  compatibility; the daily heartbeat now provides the empty-run status without
+  sending a summary on all four runs
 
 Set them in:
 
@@ -88,10 +96,28 @@ Repository -> Actions -> Bid Monitor -> Run workflow
 
 Duplicate Telegram sends are prevented by `state/sent_bids.json`.
 
-- The file stores sent `bid_id` values only.
+- The file stores each sent `bid_id` and its last delivered content hash.
 - The file is intentionally committed so GitHub Actions can keep state between scheduled runs.
 - A `bid_id` is added only after Telegram send succeeds.
+- An unchanged hash is not sent again; a changed hash is sent as a changed notice.
+- Legacy ID-only entries are baselined once without creating a duplicate alert.
 - Runtime DB and logs are not used for cross-run duplicate prevention in GitHub Actions.
+
+## Operational Reliability
+
+- The required `getBidPblancListInfoServc` request is attempted up to three
+  times for timeout, request errors, HTTP 429, and HTTP 5xx responses, with
+  `2s` then `5s` backoff. Permanent HTTP 4xx responses are not retried.
+- Optional enrichment endpoints keep their skip-on-failure behavior.
+- After all core retries fail, the run stays failed and sends at most one
+  masked failure alert per KST date.
+- The first successfully completed run each KST date sends one heartbeat, even
+  when there are no new A/B notices. Later runs still send only eligible new or
+  changed A/B notices.
+- When a persisted core incident recovers, one recovery status is sent. If that
+  day's heartbeat is also due, both statuses are combined into one message.
+- Check incidents in GitHub Actions and `state/health.json`. Daily alert gates
+  and recovery state are stored atomically in `state/notification_health.json`.
 
 ## Ignored Local Files
 

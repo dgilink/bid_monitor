@@ -18,6 +18,9 @@ from config import Settings
 
 LOGGER = logging.getLogger(__name__)
 
+CORE_MAX_ATTEMPTS = 3
+CORE_RETRY_BACKOFF_SECONDS = (2.0, 5.0)
+
 
 @dataclass
 class ApiSummary:
@@ -46,8 +49,16 @@ class DiagnoseResult:
 
 
 class CoreNaraApiError(RuntimeError):
-    # Required list API cannot be trusted.
-    pass
+    """Raised only after the required list API cannot be trusted."""
+
+    def __init__(self, operation: str, result_code: str, result_msg: str) -> None:
+        self.operation = operation
+        self.result_code = result_code
+        self.result_msg = result_msg
+        super().__init__(
+            "Core Nara API failed "
+            f"operation={operation} resultCode={result_code} resultMsg={result_msg}"
+        )
 
 
 class NaraApiClient:
@@ -87,88 +98,129 @@ class NaraApiClient:
             **params,
         }
 
-        try:
-            time.sleep(self.settings.request_sleep_seconds)
-            response = self.session.get(url, params=final_params, timeout=self.settings.request_timeout)
-            masked_body = mask_sensitive(response.text, self.settings)[:500]
-            self._save_raw(operation, response.text)
+        max_attempts = CORE_MAX_ATTEMPTS if is_core_list else 1
+        for attempt in range(1, max_attempts + 1):
+            try:
+                time.sleep(self.settings.request_sleep_seconds)
+                response = self.session.get(url, params=final_params, timeout=self.settings.request_timeout)
+                self._save_raw(operation, response.text)
 
-            data = parse_response_body(response.text)
-            result_code, result_msg = extract_result(data)
+                data = parse_response_body(response.text)
+                result_code, result_msg = extract_result(data)
+                is_transient_status = response.status_code == 429 or response.status_code >= 500
 
-            if response.status_code >= 500:
+                if is_core_list and is_transient_status and attempt < max_attempts:
+                    LOGGER.warning(
+                        "Nara API retry attempt=%s max_attempts=%s operation=%s status=%s",
+                        attempt,
+                        max_attempts,
+                        operation,
+                        response.status_code,
+                    )
+                    self._sleep_before_retry(attempt)
+                    continue
+
+                if is_transient_status:
+                    log = LOGGER.warning if is_core_list else LOGGER.info
+                    log(
+                        "%s Nara API operation failed, skipped=%s operation=%s status=%s resultCode=%s",
+                        "core" if is_core_list else "optional",
+                        not is_core_list,
+                        operation,
+                        response.status_code,
+                        result_code,
+                    )
+                    return _empty_response(
+                        f"HTTP_{response.status_code}",
+                        mask_sensitive(result_msg or "Nara API transient error", self.settings),
+                    )
+
+                if response.status_code >= 400:
+                    if response.status_code == 404 and not is_core_list:
+                        self.unsupported_operations.add(operation)
+                        LOGGER.info("optional Nara API operation unavailable, skipped: %s", operation)
+                    elif is_core_list:
+                        LOGGER.warning(
+                            "Nara API permanent request failure operation=%s status=%s resultCode=%s",
+                            operation,
+                            response.status_code,
+                            result_code,
+                        )
+                    else:
+                        LOGGER.info(
+                            "optional Nara API operation failed, skipped: %s status=%s resultCode=%s",
+                            operation,
+                            response.status_code,
+                            result_code,
+                        )
+                    return _empty_response(
+                        f"HTTP_{response.status_code}",
+                        mask_sensitive(result_msg or "Nara API request failed", self.settings),
+                    )
+
+                if not isinstance(data, dict):
+                    if is_core_list:
+                        LOGGER.warning("Nara API parse failed operation=%s status=%s", operation, response.status_code)
+                    else:
+                        LOGGER.info("optional Nara API operation parse failed, skipped: %s status=%s", operation, response.status_code)
+                    return _empty_response("PARSE_ERROR", "JSON/XML parse failed")
+
+                if not self._is_success(data):
+                    if is_core_list:
+                        LOGGER.warning("Nara API returned operation=%s resultCode=%s", operation, result_code)
+                    else:
+                        LOGGER.info(
+                            "optional Nara API operation returned non-success, skipped: %s resultCode=%s",
+                            operation,
+                            result_code,
+                        )
+                return data
+            except requests.Timeout:
+                if is_core_list and attempt < max_attempts:
+                    LOGGER.warning(
+                        "Nara API retry attempt=%s max_attempts=%s operation=%s status=TIMEOUT",
+                        attempt,
+                        max_attempts,
+                        operation,
+                    )
+                    self._sleep_before_retry(attempt)
+                    continue
+                if is_core_list:
+                    LOGGER.warning("Nara API request exhausted operation=%s status=TIMEOUT", operation)
+                else:
+                    LOGGER.info("optional Nara API operation timed out, skipped: %s", operation)
+                return _empty_response("TIMEOUT", "request timed out")
+            except requests.RequestException as exc:
+                if is_core_list and attempt < max_attempts:
+                    LOGGER.warning(
+                        "Nara API retry attempt=%s max_attempts=%s operation=%s status=%s",
+                        attempt,
+                        max_attempts,
+                        operation,
+                        exc.__class__.__name__,
+                    )
+                    self._sleep_before_retry(attempt)
+                    continue
                 if is_core_list:
                     LOGGER.warning(
-                        "Nara API server error operation=%s status=%s resultCode=%s resultMsg=%s body=%s",
+                        "Nara API request exhausted operation=%s status=%s",
                         operation,
-                        response.status_code,
-                        result_code,
-                        result_msg,
-                        masked_body,
+                        exc.__class__.__name__,
                     )
                 else:
                     LOGGER.info(
-                        "optional Nara API operation failed, skipped: %s status=%s resultCode=%s resultMsg=%s",
+                        "optional Nara API operation exception, skipped: %s status=%s",
                         operation,
-                        response.status_code,
-                        result_code,
-                        result_msg,
+                        exc.__class__.__name__,
                     )
-                return _empty_response(f"HTTP_{response.status_code}", result_msg or "Nara API server error")
+                return _empty_response("REQUEST_ERROR", "request failed")
 
-            if response.status_code >= 400:
-                if response.status_code == 404 and not is_core_list:
-                    self.unsupported_operations.add(operation)
-                    LOGGER.info("optional Nara API operation unavailable, skipped: %s", operation)
-                elif is_core_list:
-                    LOGGER.warning(
-                        "Nara API request failed operation=%s status=%s resultCode=%s resultMsg=%s body=%s",
-                        operation,
-                        response.status_code,
-                        result_code,
-                        result_msg,
-                        masked_body,
-                    )
-                else:
-                    LOGGER.info(
-                        "optional Nara API operation failed, skipped: %s status=%s resultCode=%s resultMsg=%s",
-                        operation,
-                        response.status_code,
-                        result_code,
-                        result_msg,
-                    )
-                return _empty_response(f"HTTP_{response.status_code}", result_msg or "Nara API request failed")
+        return _empty_response("REQUEST_ERROR", "request failed")
 
-            if not isinstance(data, dict):
-                if is_core_list:
-                    LOGGER.warning("Nara API parse failed operation=%s status=%s body=%s", operation, response.status_code, masked_body)
-                else:
-                    LOGGER.info("optional Nara API operation parse failed, skipped: %s status=%s", operation, response.status_code)
-                return _empty_response("PARSE_ERROR", "JSON/XML parse failed")
-
-            if not self._is_success(data):
-                if is_core_list:
-                    LOGGER.warning("Nara API returned operation=%s resultCode=%s resultMsg=%s", operation, result_code, result_msg)
-                else:
-                    LOGGER.info(
-                        "optional Nara API operation returned non-success, skipped: %s resultCode=%s resultMsg=%s",
-                        operation,
-                        result_code,
-                        result_msg,
-                    )
-            return data
-        except requests.Timeout:
-            if is_core_list:
-                LOGGER.warning("Nara API request timed out operation=%s", operation)
-            else:
-                LOGGER.info("optional Nara API operation timed out, skipped: %s", operation)
-            return _empty_response("TIMEOUT", "request timed out")
-        except requests.RequestException as exc:
-            if is_core_list:
-                LOGGER.warning("Nara API request exception operation=%s error=%s", operation, mask_sensitive(str(exc), self.settings))
-            else:
-                LOGGER.info("optional Nara API operation exception, skipped: %s error=%s", operation, mask_sensitive(str(exc), self.settings))
-            return _empty_response("REQUEST_ERROR", "request failed")
+    @staticmethod
+    def _sleep_before_retry(attempt: int) -> None:
+        delay_index = min(attempt - 1, len(CORE_RETRY_BACKOFF_SECONDS) - 1)
+        time.sleep(CORE_RETRY_BACKOFF_SECONDS[delay_index])
 
     @staticmethod
     def _is_success(data: dict[str, Any]) -> bool:
@@ -204,10 +256,9 @@ class NaraApiClient:
         normalized_code = str(result_code or "").strip()
         if normalized_code not in {"", "0", "00"}:
             raise CoreNaraApiError(
-                "Core Nara API failed "
-                f"operation={self.CORE_LIST_OPERATION} "
-                f"resultCode={normalized_code} "
-                f"resultMsg={result_msg or 'unknown'}"
+                self.CORE_LIST_OPERATION,
+                normalized_code,
+                mask_sensitive(result_msg or "unknown", self.settings),
             )
         return self._items(data)
 

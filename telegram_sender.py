@@ -54,6 +54,37 @@ C등급: {grade_counts.get("C", 0):,}건
 상태: {status}"""
 
 
+def format_failure_alert(error_summary: str) -> str:
+    return f"""[나라장터 입찰 모니터 장애]
+나라장터 핵심 API 조회 실패
+오늘 공고 모니터링이 정상 완료되지 않았습니다.
+원인: {error_summary}"""
+
+
+def format_heartbeat(fetched: int, matched: int, notified: int) -> str:
+    return f"""[나라장터 입찰 모니터 정상]
+조회공고: {fetched:,}건
+앱개발 관련 매칭: {matched:,}건
+A/B 신규·변경 알림: {notified:,}건
+상태: 정상"""
+
+
+def format_recovery_alert(
+    fetched: int | None = None,
+    matched: int | None = None,
+    notified: int | None = None,
+) -> str:
+    message = """[나라장터 입찰 모니터 복구]
+나라장터 API 조회가 다시 정상화되었습니다."""
+    if fetched is not None and matched is not None and notified is not None:
+        message += f"""
+조회공고: {fetched:,}건
+앱개발 관련 매칭: {matched:,}건
+A/B 신규·변경 알림: {notified:,}건
+상태: 정상"""
+    return message
+
+
 def format_money(value: Any) -> str:
     try:
         if value in (None, ""):

@@ -11,14 +11,15 @@ from typing import Any
 from config import INCLUDE_KEYWORDS, LOG_DIR, load_settings
 from document_parser import extract_attachment_urls, extract_text_from_files, focus_snippets
 from filter import analyze_bid, find_keywords, parse_amount
-from nara_api import DiagnoseResult, MOCK_BIDS, NaraApiClient, build_g2b_detail_url
-from state_store import SentBidState
+from nara_api import CoreNaraApiError, DiagnoseResult, MOCK_BIDS, NaraApiClient, build_g2b_detail_url, mask_sensitive
+from state_store import OperationalNotificationState, SentBidState
 from storage import BidStorage
 from telegram_sender import (
     format_bid_message,
+    format_failure_alert,
+    format_heartbeat,
     format_money,
-    format_run_summary,
-    format_summary,
+    format_recovery_alert,
     send_message,
     send_test_message,
 )
@@ -94,6 +95,7 @@ def main() -> int:
     storage = BidStorage(settings.db_path)
     run_id = storage.begin_run()
     sent_state = SentBidState()
+    operational_state = OperationalNotificationState()
     try:
         begin = datetime.now() - timedelta(days=settings.check_days)
         end = datetime.now()
@@ -156,10 +158,7 @@ def main() -> int:
                     sent_state.set_baseline(row["bid_id"], row["content_hash"])
                     notification_kind = "same"
 
-                should_notify = (
-                    row["grade"] in {"A", "B"}
-                    and notification_kind in {"new", "changed"}
-                )
+                should_notify = should_notify_bid(row["grade"], notification_kind)
                 if should_notify:
                     changed_notice = notification_kind == "changed"
                     if send_message(
@@ -173,12 +172,6 @@ def main() -> int:
                         notification_failures += 1
             except Exception as exc:
                 logging.exception("Bid processing failed: %s", exc)
-
-        summary_failed = False
-        if settings.send_empty_summary:
-            summary_failed = not send_message(settings, format_run_summary(len(bids), matched_count, grade_counts, notified_count))
-        elif grade_counts.get("C", 0):
-            summary_failed = not send_message(settings, format_summary(grade_counts.get("C", 0)))
 
         storage.finish_run(
             run_id,
@@ -197,11 +190,10 @@ def main() -> int:
             grade_counts.get("D", 0),
             notified_count,
         )
-        if notification_failures or summary_failed:
+        if notification_failures:
             logging.error(
-                "Telegram send failed notification_failures=%s summary_failed=%s",
+                "Telegram bid notification failed notification_failures=%s",
                 notification_failures,
-                summary_failed,
             )
             write_health(
                 status="failed",
@@ -212,6 +204,23 @@ def main() -> int:
             )
             return 1
 
+        if not send_success_status(
+            settings,
+            operational_state,
+            fetched_count=len(bids),
+            matched_count=matched_count,
+            notified_count=notified_count,
+        ):
+            logging.error("Telegram operational status delivery failed")
+            write_health(
+                status="failed",
+                fetched_count=len(bids),
+                matched_count=matched_count,
+                notified_count=notified_count,
+                error="Telegram operational status delivery failed",
+            )
+            return 1
+
         write_health(
             status="ok",
             fetched_count=len(bids),
@@ -219,13 +228,24 @@ def main() -> int:
             notified_count=notified_count,
         )
         return 0
+    except CoreNaraApiError as exc:
+        error_summary = summarize_core_error(exc)
+        logging.error("Core Nara API run failed: %s", error_summary)
+        storage.finish_run(run_id, error=error_summary)
+        # Persist the original core failure before attempting Telegram delivery.
+        write_health(status="failed", error=error_summary)
+        if not send_core_failure_alert(settings, operational_state, error_summary):
+            logging.error("Core failure alert delivery failed")
+        return 1
     except Exception as exc:
         logging.exception("Run failed")
-        storage.finish_run(run_id, error=str(exc))
-        write_health(status="failed", error=str(exc))
+        safe_error = mask_sensitive(str(exc), settings)
+        storage.finish_run(run_id, error=safe_error)
+        write_health(status="failed", error=safe_error)
         return 1
     finally:
         sent_state.save()
+        operational_state.save()
         storage.close()
 
 
@@ -254,6 +274,78 @@ def write_health(
         encoding="utf-8",
     )
     temp.replace(path)
+
+
+def should_notify_bid(grade: str, notification_kind: str) -> bool:
+    return grade in {"A", "B"} and notification_kind in {"new", "changed"}
+
+
+def summarize_core_error(exc: CoreNaraApiError) -> str:
+    code = exc.result_code.upper().replace("_", " ")
+    if code == "TIMEOUT":
+        reason = "TIMEOUT"
+    elif code == "HTTP 429":
+        reason = "HTTP 429"
+    elif code.startswith("HTTP 5"):
+        reason = "HTTP 5xx"
+    elif code == "REQUEST ERROR":
+        reason = "NETWORK REQUEST ERROR"
+    else:
+        reason = code[:40] or "UNKNOWN ERROR"
+    return f"{reason} (operation={exc.operation})"
+
+
+def send_core_failure_alert(
+    settings: Any,
+    state: OperationalNotificationState,
+    error_summary: str,
+    now: datetime | None = None,
+) -> bool:
+    state.record_core_failure(error_summary, now)
+    if not state.failure_alert_due(now):
+        return True
+    if not send_message(settings, format_failure_alert(error_summary)):
+        return False
+    state.mark_failure_alert_sent(now)
+    return True
+
+
+def send_success_status(
+    settings: Any,
+    state: OperationalNotificationState,
+    *,
+    fetched_count: int,
+    matched_count: int,
+    notified_count: int,
+    now: datetime | None = None,
+) -> bool:
+    recovery_due = state.recovery_alert_due(now)
+    heartbeat_due = state.heartbeat_due(now)
+
+    if not recovery_due and not heartbeat_due:
+        if state.incident_active:
+            state.mark_recovered(now, alert_sent=False)
+        return True
+
+    if recovery_due:
+        message = format_recovery_alert(
+            fetched_count if heartbeat_due else None,
+            matched_count if heartbeat_due else None,
+            notified_count if heartbeat_due else None,
+        )
+    else:
+        message = format_heartbeat(fetched_count, matched_count, notified_count)
+
+    if not send_message(settings, message):
+        return False
+
+    if recovery_due:
+        state.mark_recovered(now, alert_sent=True)
+    elif state.incident_active:
+        state.mark_recovered(now, alert_sent=False)
+    if heartbeat_due:
+        state.mark_heartbeat_sent(now)
+    return True
 
 
 def print_recent_matched(rows: list[dict[str, Any]]) -> None:
