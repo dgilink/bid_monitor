@@ -1,10 +1,10 @@
 {
-  "last_failure_alert_date": null,
+  "last_failure_alert_date": "2026-10-10",
   "last_heartbeat_date": "2026-10-09",
   "last_recovery_date": null,
-  "incident_active": false,
-  "last_core_error": null,
-  "last_failure_at": null,
+  "incident_active": true,
+  "last_core_error": "TIMEOUT (operation=getBidPblancListInfoServc)",
+  "last_failure_at": "2026-10-10T01:17:42+09:00",
   "last_recovered_at": null,
-  "updated_at": "2026-10-09T01:44:36+09:00"
+  "updated_at": "2026-10-10T01:17:42+09:00"
 }
