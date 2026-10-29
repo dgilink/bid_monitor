@@ -1,10 +1,10 @@
 {
   "last_failure_alert_date": "2026-10-29",
-  "last_heartbeat_date": "2026-10-29",
-  "last_recovery_date": "2026-10-28",
-  "incident_active": true,
+  "last_heartbeat_date": "2026-10-30",
+  "last_recovery_date": "2026-10-30",
+  "incident_active": false,
   "last_core_error": "TIMEOUT (operation=getBidPblancListInfoServc)",
   "last_failure_at": "2026-10-29T22:18:17+09:00",
-  "last_recovered_at": "2026-10-28T18:49:15+09:00",
-  "updated_at": "2026-10-29T22:18:18+09:00"
+  "last_recovered_at": "2026-10-30T01:30:25+09:00",
+  "updated_at": "2026-10-30T01:30:25+09:00"
 }
