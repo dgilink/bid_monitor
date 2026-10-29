@@ -1,8 +1,8 @@
 {
-  "status": "ok",
-  "last_run_at": "2026-10-29T10:10:29+00:00",
-  "fetched_count": 2000,
-  "matched_count": 89,
-  "notified_count": 0,
-  "error": null
+  "status": "failed",
+  "last_run_at": "2026-10-29T13:18:17+00:00",
+  "fetched_count": null,
+  "matched_count": null,
+  "notified_count": null,
+  "error": "TIMEOUT (operation=getBidPblancListInfoServc)"
 }
