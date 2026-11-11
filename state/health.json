@@ -1,8 +1,8 @@
 {
   "status": "ok",
-  "last_run_at": "2026-11-11T14:48:52+00:00",
+  "last_run_at": "2026-11-11T17:33:29+00:00",
   "fetched_count": 2000,
-  "matched_count": 92,
+  "matched_count": 104,
   "notified_count": 0,
   "error": null
 }
