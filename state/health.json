@@ -1,8 +1,8 @@
 {
-  "status": "failed",
-  "last_run_at": "2026-11-20T18:10:55+00:00",
+  "status": "ok",
+  "last_run_at": "2026-11-21T07:31:20+00:00",
   "fetched_count": 2000,
-  "matched_count": 82,
-  "notified_count": 0,
-  "error": "Telegram delivery failed"
+  "matched_count": 83,
+  "notified_count": 3,
+  "error": null
 }
